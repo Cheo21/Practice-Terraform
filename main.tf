@@ -1,84 +1,96 @@
 provider "aws" {
-  region = "us-east-1"  # Cambia esto a la región que desees
+  region = "us-east-1"
 }
 
 
-# Grupo de seguridad
-resource "aws_security_group" "beanstalk" {
-  name_prefix = "beanstalk-"
+
+
+resource "aws_launch_configuration" "example" {
+    image_id = "ami-0fc5d935ebf8bc3bc"
+    instance_type = "t2.micro"
+    security_groups = ["${aws_security_group.instance.id}"]
+    user_data = <<-EOF
+                #!/bin/bash
+                echo "Hello, World" > index.html
+                nohup busybox httpd -f -p "${var.server_port}" &
+                EOF
+    lifecycle {
+        create_before_destroy = true
+    }
 }
 
-# Regla de entrada SSH al grupo de seguridad
-resource "aws_security_group_rule" "ssh" {
-  type        = "ingress"
-  from_port   = 22
-  to_port     = 22
-  protocol    = "tcp"
-  cidr_blocks = ["0.0.0.0/0"]
-  security_group_id = aws_security_group.beanstalk.id
+
+resource "aws_security_group" "instance" {
+    name = "terraform-example-instance"
+    ingress {
+        from_port = "${var.server_port}"
+        to_port = "${var.server_port}"
+        protocol = "tcp"
+        cidr_blocks = ["0.0.0.0/0"]
+    }
+    lifecycle {
+            create_before_destroy = true
+    }
+
 }
 
-# Bucket S3
-resource "aws_s3_bucket" "my_bucket" {
-  bucket = "mi-bucket-unico"  # Nombre único del bucket
+data "aws_availability_zones" "all" {}
+
+
+resource "aws_autoscaling_group" "example" {
+    launch_configuration = "${aws_launch_configuration.example.id}"
+    availability_zones = data.aws_availability_zones.all.names
+    load_balancers = ["${aws_elb.example.name}"]
+    health_check_type = "ELB"
+
+    
+    min_size = 2
+    max_size = 10
+    
+    tag {
+      key = "Name"
+      value = "tarraform-asg-example"
+      propagate_at_launch = true
+    }
+    
 }
 
-# Dev Elastic Beanstalk Environment
-resource "aws_elastic_beanstalk_application" "dev_eb_application" {
-  name        = "DevElasticBeanstalkApp"
-  description = "Entorno de Desarrollo"
+resource "aws_elb" "example" {
+    name = "terraform-asg-example"
+    availability_zones = data.aws_availability_zones.all.names
+    security_groups = ["${aws_security_group.elb.id}"]
+
+    listener {
+      lb_port = 80
+      lb_protocol = "http"
+      instance_port = "${var.server_port}"
+      instance_protocol = "http"
+    }
+
+    health_check {
+      healthy_threshold = 2
+      unhealthy_threshold = 3
+      timeout = 3
+      interval = 30
+      target = "HTTP:${var.server_port}/"
+    }
+
 }
 
-resource "aws_elastic_beanstalk_environment" "dev_eb_environment" {
-  name                = "DevElasticBeanstalkEnv"
-  application        = aws_elastic_beanstalk_application.dev_eb_application.name
-  solution_stack_name = "solution_stack_name = "64bit Amazon Linux 2 v4.5.0 running Node.js 14"
-  platform_arn        = "arn:aws:elasticbeanstalk:us-east-1::platform/Node.js 14 running on 64bit Amazon Linux 2/4.5.0"
-  instance_profile    = "aws-elasticbeanstalk-ec2-role"
-  security_groups     = [aws_security_group.beanstalk.name]
-  settings = {
-    "aws:autoscaling:launchconfiguration" = jsonencode({
-      "InstanceType" = "t2.micro",
-    })
+resource "aws_security_group" "elb" {
+  name = "terraform-example-elb"
+
+  ingress {
+    from_port= 80
+    to_port= 80
+    protocol = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
   }
-}
 
-# Stage Elastic Beanstalk Environment
-resource "aws_elastic_beanstalk_application" "stage_eb_application" {
-  name        = "StageElasticBeanstalkApp"
-  description = "Entorno de Staging"
-}
-
-resource "aws_elastic_beanstalk_environment" "stage_eb_environment" {
-  name                = "StageElasticBeanstalkEnv"
-  application        = aws_elastic_beanstalk_application.stage_eb_application.name
-  solution_stack_name = "solution_stack_name = "64bit Amazon Linux 2 v4.5.0 running Node.js 14"
-  platform_arn        = "arn:aws:elasticbeanstalk:us-east-1::platform/Node.js 14 running on 64bit Amazon Linux 2/4.5.0"
-  instance_profile    = "aws-elasticbeanstalk-ec2-role"
-  security_groups     = [aws_security_group.beanstalk.name]
-  settings = {
-    "aws:autoscaling:launchconfiguration" = jsonencode({
-      "InstanceType" = "t2.micro",
-    })
-  }
-}
-
-# Prod Elastic Beanstalk Environment
-resource "aws_elastic_beanstalk_application" "prod_eb_application" {
-  name        = "ProdElasticBeanstalkApp"
-  description = "Entorno de Producción"
-}
-
-resource "aws_elastic_beanstalk_environment" "prod_eb_environment" {
-  name                = "ProdElasticBeanstalkEnv"
-  application        = aws_elastic_beanstalk_application.prod_eb_application.name
-  solution_stack_name = "solution_stack_name = "64bit Amazon Linux 2 v4.5.0 running Node.js 14"
-  platform_arn        = "arn:aws:elasticbeanstalk:us-east-1::platform/Node.js 14 running on 64bit Amazon Linux 2/4.5.0"
-  instance_profile    = "aws-elasticbeanstalk-ec2-role"
-  security_groups     = [aws_security_group.beanstalk.name]
-  settings = {
-    "aws:autoscaling:launchconfiguration" = jsonencode({
-      "InstanceType" = "t2.micro",
-    })
+  egress {
+    from_port = 0
+    to_port = 0
+    protocol = -1
+    cidr_blocks = ["0.0.0.0/0"]
   }
 }
