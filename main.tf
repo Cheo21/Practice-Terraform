@@ -6,7 +6,7 @@ provider "aws" {
 
 
 resource "aws_launch_configuration" "example" {
-    image_id = "ami-0fc5d935ebf8bc3bc"
+    image_id = "ami-0fc5d935ebf8bc3bc" #ami de un debian
     instance_type = "t2.micro"
     security_groups = ["${aws_security_group.instance.id}"]
     user_data = <<-EOF
